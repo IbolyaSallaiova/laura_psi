@@ -1,19 +1,87 @@
 package sk.tuke.mais.auth;
-import jakarta.persistence.*;
-@Entity @Table(name="user_accounts")
-public class UserAccount {
-  @Id @GeneratedValue(strategy=GenerationType.IDENTITY) private Long id;
-  @Column(unique=true, nullable=false) private String username;
-  @Column(nullable=false) private String passwordHash;
-  @Enumerated(EnumType.STRING) private Role rola;
-  private Long studentId; private Long teacherId;
-  private String fullName; private String studyProgram; private Integer semester;
-  public Long getId(){return id;} public String getUsername(){return username;} public void setUsername(String v){username=v;}
-  public String getPasswordHash(){return passwordHash;} public void setPasswordHash(String v){passwordHash=v;}
-  public Role getRola(){return rola;} public void setRola(Role v){rola=v;}
-  public Long getStudentId(){return studentId;} public void setStudentId(Long v){studentId=v;}
-  public Long getTeacherId(){return teacherId;} public void setTeacherId(Long v){teacherId=v;}
-  public String getFullName(){return fullName;} public void setFullName(String v){fullName=v;}
-  public String getStudyProgram(){return studyProgram;} public void setStudyProgram(String v){studyProgram=v;}
-  public Integer getSemester(){return semester;} public void setSemester(Integer v){semester=v;}
+
+import java.io.Serializable;
+
+public class UserAccount implements Serializable {
+  private long id;
+  private String username;
+  private String passwordHash;
+  private Role role;
+  private Long studentId;
+  private Long teacherId;
+  private String fullName;
+  private String studyProgram;
+  private Integer semester;
+
+  public long getId() {
+    return id;
+  }
+
+  public void setId(long id) {
+    this.id = id;
+  }
+
+  public String getUsername() {
+    return username;
+  }
+
+  public void setUsername(String username) {
+    this.username = username;
+  }
+
+  public String getPasswordHash() {
+    return passwordHash;
+  }
+
+  public void setPasswordHash(String passwordHash) {
+    this.passwordHash = passwordHash;
+  }
+
+  public Role getRole() {
+    return role;
+  }
+
+  public void setRole(Role role) {
+    this.role = role;
+  }
+
+  public Long getStudentId() {
+    return studentId;
+  }
+
+  public void setStudentId(Long studentId) {
+    this.studentId = studentId;
+  }
+
+  public Long getTeacherId() {
+    return teacherId;
+  }
+
+  public void setTeacherId(Long teacherId) {
+    this.teacherId = teacherId;
+  }
+
+  public String getFullName() {
+    return fullName;
+  }
+
+  public void setFullName(String fullName) {
+    this.fullName = fullName;
+  }
+
+  public String getStudyProgram() {
+    return studyProgram;
+  }
+
+  public void setStudyProgram(String studyProgram) {
+    this.studyProgram = studyProgram;
+  }
+
+  public Integer getSemester() {
+    return semester;
+  }
+
+  public void setSemester(Integer semester) {
+    this.semester = semester;
+  }
 }
