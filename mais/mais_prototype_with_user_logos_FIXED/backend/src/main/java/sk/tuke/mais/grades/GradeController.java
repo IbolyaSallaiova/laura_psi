@@ -145,7 +145,7 @@ public class GradeController {
                                 .map(this::mapEnrollment)
                                 .toList()
                 ))
-                .toList();
+                .collect(Collectors.toCollection(ArrayList::new));
         groups.sort(Comparator.comparing(TeacherSubjectDto.GroupDto::label));
         return new TeacherSubjectDto(
                 subject.getId(),
