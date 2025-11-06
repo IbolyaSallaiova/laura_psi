@@ -134,7 +134,6 @@ public class GradeController {
                 subject.getMaxSkuska()
         );
         List<TeacherSubjectDto.GroupDto> groups = subject.getGroups().stream()
-                .sorted(Comparator.comparing(CourseGroup::getLabel, Comparator.nullsLast(String::compareToIgnoreCase)))
                 .map(group -> new TeacherSubjectDto.GroupDto(
                         group.getId(),
                         group.getCode(),
@@ -147,6 +146,7 @@ public class GradeController {
                                 .toList()
                 ))
                 .toList();
+        groups.sort(Comparator.comparing(TeacherSubjectDto.GroupDto::label));
         return new TeacherSubjectDto(
                 subject.getId(),
                 subject.getCode(),
