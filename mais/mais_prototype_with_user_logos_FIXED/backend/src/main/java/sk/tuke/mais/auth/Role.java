@@ -1,1 +1,7 @@
-package sk.tuke.mais.auth; public enum Role { STUDENT, TEACHER, ADMIN }
+package sk.tuke.mais.auth;
+
+public enum Role {
+  STUDENT,
+  TEACHER,
+  ADMIN
+}
