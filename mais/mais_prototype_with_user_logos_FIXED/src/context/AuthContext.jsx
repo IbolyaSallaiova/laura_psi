@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 
-import { apiFetch } from "../utils/api";
-
 const AuthContext = createContext(null);
+const API = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
@@ -13,10 +12,16 @@ export function AuthProvider({ children }) {
   const isAuthenticated = !!token && !!user;
 
   async function login({ username, password }) {
-    const data = await apiFetch("/api/auth/login", {
+    const res = await fetch(`${API}/api/auth/login`, {
       method: "POST",
-      body: { username, password },
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Prihlásenie zlyhalo");
+    }
+    const data = await res.json();
     setUser(data.user);
     setToken(data.token);
     localStorage.setItem("mais_user", JSON.stringify(data.user));

@@ -1,316 +1,314 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
-import { apiFetch } from "../utils/api";
-import { useAuth } from "../context/AuthContext";
+/** Demo dáta učiteľa: predmety, termíny, študenti */
+const teacherData = [
+    {
+        code: "INF101",
+        name: "Programovanie 1",
+        slots: [
+            { id: "inf101-1", label: "Po 08:00–09:30 (A-101)", room: "A-101" },
+            { id: "inf101-2", label: "St 10:00–11:30 (A-102)", room: "A-102" },
+        ],
+        students: [
+            { id: 1, name: "Bc. Študent A" },
+            { id: 2, name: "Bc. Študent B" },
+            { id: 3, name: "Bc. Študent C" },
+        ],
+    },
+    {
+        code: "MAT101",
+        name: "Matematika 1",
+        slots: [
+            { id: "mat101-1", label: "Ut 09:45–11:15 (B-201)", room: "B-201" },
+        ],
+        students: [
+            { id: 4, name: "Bc. Študent D" },
+            { id: 5, name: "Bc. Študent E" },
+        ],
+    },
+    {
+        code: "ALG201",
+        name: "Algoritmy",
+        slots: [
+            { id: "alg201-1", label: "Št 11:30–13:00 (C-301)", room: "C-301" },
+        ],
+        students: [
+            { id: 6, name: "Bc. Študent F" },
+            { id: 7, name: "Bc. Študent G" },
+            { id: 8, name: "Bc. Študent H" },
+        ],
+    },
+];
 
-function formatDate(isoString) {
-    if (!isoString) return "—";
-    try {
-        return new Date(isoString).toLocaleString("sk-SK", {
-            dateStyle: "short",
-            timeStyle: "short",
-        });
-    } catch (error) {
-        return isoString;
-    }
+/** Váhy hodnotení (spolu 100) */
+const WEIGHTS = {
+    zapocet: 20, // Z
+    zadanie1: 30, // Z1
+    skuska: 50, // S
+};
+
+/** Mapa percent -> ECTS písmeno */
+function percentToGrade(p) {
+    const x = Math.round(p);
+    if (x >= 91) return "A";
+    if (x >= 81) return "B";
+    if (x >= 73) return "C";
+    if (x >= 66) return "D";
+    if (x >= 60) return "E";
+    return "FX";
+}
+
+/** Utility na bezpečné číslo 0–100 */
+function clampPercent(v) {
+    const n = Number(v);
+    if (Number.isNaN(n)) return "";
+    return Math.max(0, Math.min(100, n));
 }
 
 export default function ZapisZnamok() {
-    const { token, user } = useAuth();
-    const [subjects, setSubjects] = useState([]);
-    const [selectedSubjectId, setSelectedSubjectId] = useState(null);
-    const [subjectsLoading, setSubjectsLoading] = useState(true);
-    const [grades, setGrades] = useState([]);
-    const [gradesLoading, setGradesLoading] = useState(false);
-    const [error, setError] = useState(null);
-    const [formError, setFormError] = useState(null);
-    const [successMessage, setSuccessMessage] = useState(null);
-    const [submitting, setSubmitting] = useState(false);
-    const [form, setForm] = useState({
-        studentId: "",
-        value: "1",
-        description: "",
-    });
-
+    const [subjectCode, setSubjectCode] = useState(teacherData[0].code);
     const subject = useMemo(
-        () => subjects.find((item) => item.id === selectedSubjectId) || null,
-        [subjects, selectedSubjectId]
+        () => teacherData.find((c) => c.code === subjectCode),
+        [subjectCode]
     );
 
-    useEffect(() => {
-        if (!token || !user) return;
-        let ignore = false;
-        setSubjectsLoading(true);
-        setError(null);
-        apiFetch("/api/subjects", { token })
-            .then((data) => {
-                if (ignore) return;
-                setSubjects(data || []);
-                if (data && data.length > 0) {
-                    const first = data[0];
-                    setSelectedSubjectId((prev) => {
-                        if (prev && data.some((item) => item.id === prev)) {
-                            return prev;
-                        }
-                        return first.id;
-                    });
-                } else {
-                    setSelectedSubjectId(null);
-                }
-            })
-            .catch((err) => {
-                if (ignore) return;
-                setError(err.message || "Nepodarilo sa načítať predmety.");
-            })
-            .finally(() => {
-                if (!ignore) {
-                    setSubjectsLoading(false);
-                }
-            });
-        return () => {
-            ignore = true;
-        };
-    }, [token, user]);
+    const [slotId, setSlotId] = useState(subject?.slots[0]?.id || "");
 
-    useEffect(() => {
-        if (!token || !selectedSubjectId) {
-            setGrades([]);
-            return;
-        }
-        let ignore = false;
-        setGradesLoading(true);
-        setFormError(null);
-        setSuccessMessage(null);
-        apiFetch(`/api/subjects/${selectedSubjectId}/grades`, { token })
-            .then((data) => {
-                if (ignore) return;
-                setGrades(data || []);
-            })
-            .catch((err) => {
-                if (ignore) return;
-                setError(err.message || "Nepodarilo sa načítať známky.");
-            })
-            .finally(() => {
-                if (!ignore) {
-                    setGradesLoading(false);
-                }
-            });
-        return () => {
-            ignore = true;
-        };
-    }, [token, selectedSubjectId]);
-
-    useEffect(() => {
-        if (!subject) {
-            setForm((prev) => ({ ...prev, studentId: "" }));
-            return;
-        }
-        const studentIds = (subject.students || []).map((student) => String(student.id));
-        setForm((prev) => {
-            if (prev.studentId && studentIds.includes(prev.studentId)) {
-                return prev;
-            }
-            return {
-                ...prev,
-                studentId: studentIds[0] || "",
-            };
-        });
+    // per-term hodnotenia študentov (key = subjectCode|slotId)
+    const key = `${subjectCode}|${slotId}`;
+    const initialRows = useMemo(() => {
+        if (!subject) return [];
+        return subject.students.map((s) => ({
+            studentId: s.id,
+            student: s.name,
+            zapocet: "",   // 0..100
+            zadanie1: "",  // 0..100
+            skuska: "",    // 0..100
+            finalOverride: "", // '', 'A'..'FX'
+        }));
     }, [subject]);
 
-    const handleSubmit = async (event) => {
-        event.preventDefault();
-        if (!selectedSubjectId) {
-            setFormError("Vyberte predmet.");
-            return;
-        }
-        if (!form.studentId) {
-            setFormError("Vyberte študenta.");
-            return;
-        }
-        const valueNumber = Number(form.value);
-        if (!Number.isInteger(valueNumber) || valueNumber < 1 || valueNumber > 5) {
-            setFormError("Známka musí byť v rozsahu 1 – 5.");
-            return;
-        }
-        setSubmitting(true);
-        setFormError(null);
-        setSuccessMessage(null);
-        try {
-            const payload = {
-                studentId: Number(form.studentId),
-                value: valueNumber,
-                description: form.description?.trim() ? form.description.trim() : null,
-            };
-            const newGrade = await apiFetch(`/api/subjects/${selectedSubjectId}/grades`, {
-                method: "POST",
-                token,
-                body: payload,
-            });
-            setGrades((prev) => [newGrade, ...(prev || [])]);
-            setSuccessMessage("Známka bola úspešne zapísaná.");
-            setForm((prev) => ({
-                ...prev,
-                value: "1",
-                description: "",
-            }));
-        } catch (err) {
-            setFormError(err.message || "Známku sa nepodarilo uložiť.");
-        } finally {
-            setSubmitting(false);
-        }
+    const [dataByKey, setDataByKey] = useState({ [key]: initialRows });
+
+    // vždy keď sa zmení predmet/slot a nemáme tam dáta, inicializovať
+    const rows = dataByKey[key] || initialRows;
+
+    const setRows = (newRows) => {
+        setDataByKey((prev) => ({ ...prev, [key]: newRows }));
     };
 
-    const renderStudentsList = () => {
-        if (!subject) {
-            return <div className="small">Vyberte predmet.</div>;
-        }
-        const students = subject.students || [];
-        if (!students.length) {
-            return <div className="small">Na predmet nie sú zapísaní žiadni študenti.</div>;
-        }
-        return (
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
-                {students.map((student) => (
-                    <li key={student.id}>
-                        {student.fullName || student.username || `#${student.id}`}
-                    </li>
-                ))}
-            </ul>
+    const updateCell = (studentId, field, value) => {
+        setRows(
+            rows.map((r) =>
+                r.studentId === studentId ? { ...r, [field]: value } : r
+            )
         );
     };
+
+    const weightedPercent = (r) => {
+        const z = Number(r.zapocet) || 0;
+        const z1 = Number(r.zadanie1) || 0;
+        const s = Number(r.skuska) || 0;
+        const total =
+            (z * WEIGHTS.zapocet +
+                z1 * WEIGHTS.zadanie1 +
+                s * WEIGHTS.skuska) /
+            100;
+        return total;
+    };
+
+    const withGrade = (r) => {
+        const total = weightedPercent(r);
+        const autoGrade = percentToGrade(total);
+        const grade = r.finalOverride || autoGrade;
+        return { ...r, total, grade, autoGrade };
+    };
+
+    const enriched = rows.map(withGrade);
+
+    const avgPercent = useMemo(() => {
+        const nums = enriched.map((r) => r.total).filter((n) => !Number.isNaN(n));
+        if (!nums.length) return "—";
+        return (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) + " %";
+    }, [enriched]);
+
+    const save = () => {
+        // v demu len uložíme do localStorage pre ten key
+        localStorage.setItem(`grades_${key}`, JSON.stringify(rows));
+        alert("Známky uložené (demo).");
+    };
+
+    const reset = () => {
+        setRows(initialRows);
+    };
+
+    // ak sa zmení subject, nastav default slot (ak chýba)
+    React.useEffect(() => {
+        if (!subject) return;
+        if (!subject.slots.find((s) => s.id === slotId)) {
+            setSlotId(subject.slots[0]?.id || "");
+        }
+    }, [subjectCode]); // eslint-disable-line react-hooks/exhaustive-deps
 
     return (
         <div className="card">
             <h3 style={{ marginTop: 0 }}>Zápis známok</h3>
 
-            {error && (
-                <div className="badge" style={{ background: "var(--danger)", color: "white", marginBottom: 12 }}>
-                    {error}
+            {/* Výber predmetu a termínu */}
+            <div className="form-row" style={{ gap: 12, alignItems: "end" }}>
+                <div style={{ flex: 1 }}>
+                    <div className="small">Predmet</div>
+                    <select
+                        className="input"
+                        value={subjectCode}
+                        onChange={(e) => setSubjectCode(e.target.value)}
+                    >
+                        {teacherData.map((c) => (
+                            <option key={c.code} value={c.code}>
+                                {c.code} — {c.name}
+                            </option>
+                        ))}
+                    </select>
                 </div>
-            )}
+                <div style={{ flex: 1 }}>
+                    <div className="small">Termín / čas</div>
+                    <select
+                        className="input"
+                        value={slotId}
+                        onChange={(e) => setSlotId(e.target.value)}
+                    >
+                        {subject?.slots.map((s) => (
+                            <option key={s.id} value={s.id}>
+                                {s.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div className="badge" title="Váhy hodnotení">
+                    Váhy: Z {WEIGHTS.zapocet}% • Z1 {WEIGHTS.zadanie1}% • S {WEIGHTS.skuska}%
+                </div>
+            </div>
 
-            {subjectsLoading ? (
-                <div>Načítavam predmety...</div>
-            ) : (
-                <>
-                    <div className="form-row" style={{ gap: 12, alignItems: "end" }}>
-                        <div style={{ flex: 2 }}>
-                            <div className="small">Predmet</div>
+            {/* Priemer */}
+            <div className="small" style={{ marginTop: 8 }}>
+                Priemer spolu: <strong>{avgPercent}</strong>
+            </div>
+
+            {/* Tabuľka študentov */}
+            <table className="table table-compact" style={{ marginTop: 8 }}>
+                <thead>
+                <tr>
+                    <th>Kód</th>
+                    <th>Predmet</th>
+                    <th>Termín</th>
+                    <th>Študent</th>
+                    <th>Z (0–100)</th>
+                    <th>Z1 (0–100)</th>
+                    <th>S (0–100)</th>
+                    <th>% spolu</th>
+                    <th>Známka</th>
+                </tr>
+                </thead>
+                <tbody>
+                {enriched.map((r) => (
+                    <tr key={r.studentId}>
+                        <td>
+                            <span className="pill pill-blue">{subject.code}</span>
+                        </td>
+                        <td>{subject.name}</td>
+                        <td>{subject.slots.find((s) => s.id === slotId)?.label || "—"}</td>
+                        <td>{r.student}</td>
+                        <td style={{ width: 110 }}>
+                            <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={r.zapocet}
+                                onChange={(e) =>
+                                    updateCell(r.studentId, "zapocet", clampPercent(e.target.value))
+                                }
+                            />
+                        </td>
+                        <td style={{ width: 110 }}>
+                            <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={r.zadanie1}
+                                onChange={(e) =>
+                                    updateCell(r.studentId, "zadanie1", clampPercent(e.target.value))
+                                }
+                            />
+                        </td>
+                        <td style={{ width: 110 }}>
+                            <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={r.skuska}
+                                onChange={(e) =>
+                                    updateCell(r.studentId, "skuska", clampPercent(e.target.value))
+                                }
+                            />
+                        </td>
+                        <td>
+                            <strong>{Math.round(r.total || 0)} %</strong>
+                            {r.finalOverride && (
+                                <div className="small" title={`Automatická: ${r.autoGrade}`}>
+                                    auto: {r.autoGrade}
+                                </div>
+                            )}
+                        </td>
+                        <td style={{ width: 120 }}>
                             <select
                                 className="input"
-                                value={selectedSubjectId ?? ""}
-                                onChange={(e) => setSelectedSubjectId(e.target.value ? Number(e.target.value) : null)}
-                                disabled={!subjects.length}
+                                value={r.finalOverride || r.grade}
+                                onChange={(e) =>
+                                    updateCell(
+                                        r.studentId,
+                                        "finalOverride",
+                                        e.target.value === r.autoGrade ? "" : e.target.value
+                                    )
+                                }
                             >
-                                {subjects.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                        {item.code ? `${item.code} — ` : ""}{item.name}
+                                {["A", "B", "C", "D", "E", "FX"].map((g) => (
+                                    <option key={g} value={g}>
+                                        {g}
                                     </option>
                                 ))}
-                                {!subjects.length && <option value="">Žiadne predmety</option>}
                             </select>
-                        </div>
-                        <div style={{ flex: 1 }}>
-                            <div className="small">Študenti zapísaní na predmet</div>
-                            <div className="small" style={{ maxHeight: 120, overflow: "auto", padding: 8, background: "var(--bg-muted)", borderRadius: 8 }}>
-                                {renderStudentsList()}
-                            </div>
-                        </div>
-                    </div>
+                            {r.finalOverride && (
+                                <div className="small" style={{ color: "var(--muted)" }}>
+                                    (upravené)
+                                </div>
+                            )}
+                        </td>
+                    </tr>
+                ))}
+                {enriched.length === 0 && (
+                    <tr>
+                        <td colSpan={9} className="small">
+                            Žiadni študenti na tomto termíne.
+                        </td>
+                    </tr>
+                )}
+                </tbody>
+            </table>
 
-                    <form onSubmit={handleSubmit} style={{ marginTop: 16 }}>
-                        <div className="form-row" style={{ gap: 12 }}>
-                            <div style={{ flex: 2 }}>
-                                <div className="small">Študent</div>
-                                <select
-                                    className="input"
-                                    value={form.studentId}
-                                    onChange={(e) => setForm((prev) => ({ ...prev, studentId: e.target.value }))}
-                                    disabled={!subject || !(subject.students || []).length}
-                                >
-                                    {(subject?.students || []).map((student) => (
-                                        <option key={student.id} value={student.id}>
-                                            {student.fullName || student.username || `#${student.id}`}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <div className="small">Známka (1–5)</div>
-                                <input
-                                    className="input"
-                                    type="number"
-                                    min={1}
-                                    max={5}
-                                    step={1}
-                                    value={form.value}
-                                    onChange={(e) => setForm((prev) => ({ ...prev, value: e.target.value }))}
-                                />
-                            </div>
-                        </div>
-                        <div className="form-row" style={{ gap: 12, marginTop: 12 }}>
-                            <div style={{ flex: 1 }}>
-                                <div className="small">Popis hodnotenia (voliteľné)</div>
-                                <textarea
-                                    className="input"
-                                    rows={2}
-                                    value={form.description}
-                                    onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-                                />
-                            </div>
-                        </div>
-                        {formError && (
-                            <div className="small" style={{ color: "var(--danger)", marginTop: 8 }}>
-                                {formError}
-                            </div>
-                        )}
-                        {successMessage && (
-                            <div className="small" style={{ color: "var(--success)", marginTop: 8 }}>
-                                {successMessage}
-                            </div>
-                        )}
-                        <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-                            <button className="btn primary" type="submit" disabled={submitting || !subject}>
-                                {submitting ? "Ukladám..." : "Zapísať známku"}
-                            </button>
-                        </div>
-                    </form>
-
-                    <div style={{ marginTop: 24 }}>
-                        <h4>História známok</h4>
-                        {gradesLoading ? (
-                            <div>Načítavam známky...</div>
-                        ) : grades.length === 0 ? (
-                            <div className="small">Zatiaľ neboli zapísané žiadne známky.</div>
-                        ) : (
-                            <table className="table table-compact" style={{ marginTop: 8 }}>
-                                <thead>
-                                <tr>
-                                    <th>Študent</th>
-                                    <th>Známka</th>
-                                    <th>Popis</th>
-                                    <th>Zadávateľ</th>
-                                    <th>Dátum</th>
-                                </tr>
-                                </thead>
-                                <tbody>
-                                {grades.map((grade) => (
-                                    <tr key={grade.id}>
-                                        <td>{grade.studentName || `#${grade.studentId}`}</td>
-                                        <td>
-                                            <span className="pill gold">{grade.value}</span>
-                                        </td>
-                                        <td>{grade.description || "—"}</td>
-                                        <td>{grade.teacherName || "—"}</td>
-                                        <td>{formatDate(grade.assignedAt)}</td>
-                                    </tr>
-                                ))}
-                                </tbody>
-                            </table>
-                        )}
-                    </div>
-                </>
-            )}
+            <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                <button className="btn primary" onClick={save}>
+                    Uložiť
+                </button>
+                <button className="btn" onClick={reset}>
+                    Zrušiť zmeny
+                </button>
+            </div>
         </div>
     );
 }

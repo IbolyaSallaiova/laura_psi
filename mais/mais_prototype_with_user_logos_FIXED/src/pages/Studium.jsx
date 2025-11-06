@@ -1,102 +1,29 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
-import { apiFetch } from '../utils/api';
-import { useAuth } from '../context/AuthContext';
-
-function formatGradeDate(isoString) {
-    if (!isoString) return '—';
-    try {
-        return new Date(isoString).toLocaleString('sk-SK', {
-            dateStyle: 'short',
-            timeStyle: 'short',
-        });
-    } catch (error) {
-        return isoString;
-    }
-}
-
 export default function Studium() {
-    const { token } = useAuth();
-
     /* ======= Moje predmety / známky ======= */
-    const [grades, setGrades] = useState([]);
-    const [loadingGrades, setLoadingGrades] = useState(false);
-    const [gradesError, setGradesError] = useState(null);
-    const [selectedSubjectId, setSelectedSubjectId] = useState(null);
-
-    useEffect(() => {
-        if (!token) {
-            setGrades([]);
-            return;
-        }
-        let ignore = false;
-        setLoadingGrades(true);
-        setGradesError(null);
-        apiFetch('/api/grades/me', { token })
-            .then((data) => {
-                if (ignore) return;
-                setGrades(Array.isArray(data) ? data : []);
+    const semesters = ['2024/2025 LS', '2024/2025 ZS', '2025/2026 ZS'];
+    const [sem, setSem] = useState(semesters[0]);
+    const [grades, setGrades] = useState(() =>
+        JSON.parse(
+            localStorage.getItem('mais_grades') ||
+            JSON.stringify({
+                '2024/2025 LS': [
+                    { code: 'INF101', name: 'Programovanie 1', grade: 1.3 },
+                    { code: 'MAT101', name: 'Matematika 1', grade: 1.7 },
+                ],
+                '2024/2025 ZS': [{ code: 'ALG201', name: 'Algoritmy', grade: 2.0 }],
+                '2025/2026 ZS': [],
             })
-            .catch((err) => {
-                if (ignore) return;
-                setGradesError(err.message || 'Známky sa nepodarilo načítať.');
-            })
-            .finally(() => {
-                if (!ignore) {
-                    setLoadingGrades(false);
-                }
-            });
-        return () => {
-            ignore = true;
-        };
-    }, [token]);
-
-    const subjects = useMemo(() => {
-        const map = new Map();
-        grades.forEach((grade) => {
-            if (!grade.subjectId) return;
-            const entry = map.get(grade.subjectId) || {
-                id: grade.subjectId,
-                name: grade.subjectName || 'Neznámy predmet',
-                code: grade.subjectCode || '',
-                grades: [],
-            };
-            entry.grades.push(grade);
-            map.set(grade.subjectId, entry);
-        });
-        return Array.from(map.values()).map((entry) => {
-            const average = entry.grades.length
-                ? (entry.grades.reduce((sum, item) => sum + Number(item.value || 0), 0) / entry.grades.length).toFixed(2)
-                : '—';
-            return { ...entry, average };
-        });
-    }, [grades]);
-
-    useEffect(() => {
-        if (!subjects.length) {
-            setSelectedSubjectId(null);
-            return;
-        }
-        setSelectedSubjectId((prev) => {
-            if (prev && subjects.some((subject) => subject.id === prev)) {
-                return prev;
-            }
-            return subjects[0].id;
-        });
-    }, [subjects]);
-
-    const selectedGrades = useMemo(() => {
-        if (!selectedSubjectId) return grades;
-        return grades.filter((grade) => grade.subjectId === selectedSubjectId);
-    }, [grades, selectedSubjectId]);
+        )
+    );
+    useEffect(() => localStorage.setItem('mais_grades', JSON.stringify(grades)), [grades]);
 
     const avg = useMemo(() => {
-        if (!selectedGrades.length) return '—';
-        return (
-            selectedGrades.reduce((sum, grade) => sum + Number(grade.value || 0), 0) /
-            selectedGrades.length
-        ).toFixed(2);
-    }, [selectedGrades]);
+        const list = grades[sem] || [];
+        if (!list.length) return '—';
+        return (list.reduce((s, i) => s + (Number(i.grade) || 0), 0) / list.length).toFixed(2);
+    }, [grades, sem]);
 
     /* ======= Info / Štipendiá / Platby ======= */
     const studyInfo = {
@@ -194,71 +121,52 @@ export default function Studium() {
                 <div className="section-head">
                     <div>
                         <h3>Moje predmety</h3>
-                        <div className="small">Vyber predmet</div>
+                        <div className="small">Vyber semester</div>
                     </div>
                     <select
-                        value={selectedSubjectId ?? ''}
-                        onChange={(e) => setSelectedSubjectId(e.target.value ? Number(e.target.value) : null)}
+                        value={sem}
+                        onChange={(e) => setSem(e.target.value)}
                         className="input select-sem"
-                        disabled={!subjects.length}
                     >
-                        {subjects.map((subject) => (
-                            <option key={subject.id} value={subject.id}>
-                                {subject.code ? `${subject.code} — ` : ''}{subject.name}
-                            </option>
+                        {semesters.map((s) => (
+                            <option key={s}>{s}</option>
                         ))}
-                        {!subjects.length && <option value="">Žiadne predmety</option>}
                     </select>
                 </div>
 
-                    <div className="small">
-                        Priemerná známka: <strong className="gold-text">{avg}</strong>
-                    </div>
-                    {gradesError && (
-                        <div className="small" style={{ color: 'var(--danger)', marginTop: 8 }}>
-                            {gradesError}
-                        </div>
-                    )}
-                    {loadingGrades ? (
-                        <div style={{ marginTop: 12 }}>Načítavam známky...</div>
-                    ) : (
-                        <table className="table table-compact" style={{ marginTop: 8 }}>
-                            <thead>
-                            <tr>
-                                <th>Kód</th>
-                                <th>Názov</th>
-                                <th>Známka</th>
-                                <th>Popis</th>
-                                <th>Učiteľ</th>
-                                <th>Dátum</th>
-                            </tr>
-                            </thead>
-                            <tbody>
-                            {selectedGrades.map((grade) => (
-                                <tr key={grade.id}>
-                                    <td>
-                                        <span className="pill pill-blue">{grade.subjectCode || '—'}</span>
-                                    </td>
-                                    <td>{grade.subjectName || '—'}</td>
-                                    <td>
-                                        <span className="pill gold">{grade.value}</span>
-                                    </td>
-                                    <td>{grade.description || '—'}</td>
-                                    <td>{grade.teacherName || '—'}</td>
-                                    <td>{formatGradeDate(grade.assignedAt)}</td>
-                                </tr>
-                            ))}
-                            {selectedGrades.length === 0 && !loadingGrades && (
-                                <tr>
-                                    <td colSpan={6} className="small">
-                                        Žiadne známky pre vybraný predmet.
-                                    </td>
-                                </tr>
-                            )}
-                            </tbody>
-                        </table>
-                    )}
+                <div className="small">
+                    Priemer predmetov: <strong className="gold-text">{avg}</strong>
                 </div>
+                <table className="table table-compact" style={{ marginTop: 8 }}>
+                    <thead>
+                    <tr>
+                        <th>Kód</th>
+                        <th>Názov</th>
+                        <th>Známka</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {(grades[sem] || []).map((g, i) => (
+                        <tr key={i}>
+                            <td>
+                                <span className="pill pill-blue">{g.code}</span>
+                            </td>
+                            <td>{g.name}</td>
+                            <td>
+                                <span className="pill gold">{g.grade}</span>
+                            </td>
+                        </tr>
+                    ))}
+                    {(grades[sem] || []).length === 0 && (
+                        <tr>
+                            <td colSpan={3} className="small">
+                                Žiadne predmety
+                            </td>
+                        </tr>
+                    )}
+                    </tbody>
+                </table>
+            </div>
 
             {/* ==== Štipendiá ==== */}
             <div className="card">
