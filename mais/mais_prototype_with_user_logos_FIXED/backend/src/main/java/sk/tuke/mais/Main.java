@@ -222,6 +222,7 @@ public class Main {
     service.findSubject(grade.getSubjectId()).ifPresent(subject -> {
       dto.put("subjectId", subject.getId());
       dto.put("subjectName", subject.getName());
+      dto.put("subjectCode", subject.getCode());
     });
     users.findById(grade.getStudentId()).ifPresent(student -> {
       dto.put("studentId", student.getId());
