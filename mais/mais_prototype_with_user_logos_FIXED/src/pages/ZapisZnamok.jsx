@@ -32,7 +32,7 @@ function clampScore(v, max) {
 const API = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 export default function ZapisZnamok() {
-    const { token, user } = useAuth();
+    const { token, user, logout } = useAuth();
     const [subjects, setSubjects] = React.useState([]);
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState(null);
@@ -60,6 +60,10 @@ export default function ZapisZnamok() {
                         Authorization: `Bearer ${token}`,
                     },
                 });
+                if (res.status === 401 || res.status === 403) {
+                    logout();
+                    throw new Error("Vaše prihlásenie vypršalo. Prihláste sa znova.");
+                }
                 if (!res.ok) {
                     throw new Error("Nepodarilo sa načítať predmety");
                 }
@@ -254,6 +258,10 @@ export default function ZapisZnamok() {
                     body: JSON.stringify(payload),
                 }
             );
+            if (res.status === 401 || res.status === 403) {
+                logout();
+                throw new Error("Vaše prihlásenie vypršalo. Prihláste sa znova.");
+            }
             if (!res.ok) {
                 const message = await res.text();
                 throw new Error(message || "Ukladanie zlyhalo");
