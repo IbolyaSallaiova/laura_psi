@@ -1,29 +1,88 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '../context/AuthContext';
+
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 export default function Studium() {
     /* ======= Moje predmety / známky ======= */
-    const semesters = ['2024/2025 LS', '2024/2025 ZS', '2025/2026 ZS'];
-    const [sem, setSem] = useState(semesters[0]);
-    const [grades, setGrades] = useState(() =>
-        JSON.parse(
-            localStorage.getItem('mais_grades') ||
-            JSON.stringify({
-                '2024/2025 LS': [
-                    { code: 'INF101', name: 'Programovanie 1', grade: 1.3 },
-                    { code: 'MAT101', name: 'Matematika 1', grade: 1.7 },
-                ],
-                '2024/2025 ZS': [{ code: 'ALG201', name: 'Algoritmy', grade: 2.0 }],
-                '2025/2026 ZS': [],
-            })
-        )
-    );
-    useEffect(() => localStorage.setItem('mais_grades', JSON.stringify(grades)), [grades]);
+    const { token, user } = useAuth();
+    const isStudent = user?.role === 'STUDENT';
+    const [semesters, setSemesters] = useState([]);
+    const [sem, setSem] = useState('');
+    const [loadingGrades, setLoadingGrades] = useState(false);
+    const [gradeError, setGradeError] = useState(null);
+
+    useEffect(() => {
+        if (!isStudent || !token) {
+            setSemesters([]);
+            setSem('');
+            setGradeError(null);
+            setLoadingGrades(false);
+            return;
+        }
+        let cancelled = false;
+        async function loadGrades() {
+            setLoadingGrades(true);
+            setGradeError(null);
+            try {
+                const res = await fetch(`${API}/api/student/grades`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
+                if (!res.ok) {
+                    throw new Error('Nepodarilo sa načítať hodnotenia');
+                }
+                const data = await res.json();
+                if (!cancelled) {
+                    const list = data.semesters || [];
+                    setSemesters(list);
+                    if (list.length > 0) {
+                        setSem((prev) =>
+                            prev && list.some((s) => s.label === prev) ? prev : list[0].label
+                        );
+                    } else {
+                        setSem('');
+                    }
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    setGradeError(err.message || String(err));
+                    setSemesters([]);
+                    setSem('');
+                }
+            } finally {
+                if (!cancelled) setLoadingGrades(false);
+            }
+        }
+        loadGrades();
+        return () => {
+            cancelled = true;
+        };
+    }, [isStudent, token]);
+
+    useEffect(() => {
+        if (!semesters.length) return;
+        if (!semesters.some((s) => s.label === sem)) {
+            setSem(semesters[0].label);
+        }
+    }, [semesters, sem]);
+
+    const selectedSemester = useMemo(() => {
+        if (!sem) return semesters[0] || { label: '', subjects: [] };
+        return semesters.find((s) => s.label === sem) || { label: sem, subjects: [] };
+    }, [sem, semesters]);
+
+    const gradesForSemester = selectedSemester?.subjects || [];
 
     const avg = useMemo(() => {
-        const list = grades[sem] || [];
-        if (!list.length) return '—';
-        return (list.reduce((s, i) => s + (Number(i.grade) || 0), 0) / list.length).toFixed(2);
-    }, [grades, sem]);
+        if (!gradesForSemester.length) return '—';
+        const total = gradesForSemester.reduce(
+            (sum, item) => sum + (Number(item.percent) || 0),
+            0
+        );
+        return (total / gradesForSemester.length).toFixed(1) + ' %';
+    }, [gradesForSemester]);
 
     /* ======= Info / Štipendiá / Platby ======= */
     const studyInfo = {
@@ -127,15 +186,21 @@ export default function Studium() {
                         value={sem}
                         onChange={(e) => setSem(e.target.value)}
                         className="input select-sem"
+                        disabled={!semesters.length}
                     >
                         {semesters.map((s) => (
-                            <option key={s}>{s}</option>
+                            <option key={s.label} value={s.label}>
+                                {s.label}
+                            </option>
                         ))}
                     </select>
                 </div>
 
                 <div className="small">
-                    Priemer predmetov: <strong className="gold-text">{avg}</strong>
+                    Priemer predmetov:{' '}
+                    <strong className="gold-text">
+                        {loadingGrades ? '—' : avg}
+                    </strong>
                 </div>
                 <table className="table table-compact" style={{ marginTop: 8 }}>
                     <thead>
@@ -146,21 +211,38 @@ export default function Studium() {
                     </tr>
                     </thead>
                     <tbody>
-                    {(grades[sem] || []).map((g, i) => (
+                    {loadingGrades && (
+                        <tr>
+                            <td colSpan={3} className="small">
+                                Načítavam hodnotenia…
+                            </td>
+                        </tr>
+                    )}
+                    {!loadingGrades && gradeError && (
+                        <tr>
+                            <td colSpan={3} className="small" style={{ color: 'var(--danger)' }}>
+                                {gradeError}
+                            </td>
+                        </tr>
+                    )}
+                    {!loadingGrades && !gradeError && gradesForSemester.map((g, i) => (
                         <tr key={i}>
                             <td>
                                 <span className="pill pill-blue">{g.code}</span>
                             </td>
                             <td>{g.name}</td>
                             <td>
-                                <span className="pill gold">{g.grade}</span>
+                                <span className="pill gold">{g.grade || '—'}</span>
+                                <div className="small">
+                                    {g.percent != null ? `${Math.round(g.percent)} %` : '—'}
+                                </div>
                             </td>
                         </tr>
                     ))}
-                    {(grades[sem] || []).length === 0 && (
+                    {!loadingGrades && !gradeError && gradesForSemester.length === 0 && (
                         <tr>
                             <td colSpan={3} className="small">
-                                Žiadne predmety
+                                {isStudent ? 'Žiadne predmety' : 'Len pre prihlásených študentov'}
                             </td>
                         </tr>
                     )}
