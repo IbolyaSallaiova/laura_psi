@@ -3,11 +3,28 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 const AuthContext = createContext(null);
 const API = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
+function readStoredUser() {
+  if (typeof window === "undefined" || !window.localStorage) return null;
+  const raw = localStorage.getItem("mais_user");
+  if (!raw || raw === "null" || raw === "undefined") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredToken() {
+  if (typeof window === "undefined" || !window.localStorage) return null;
+  const raw = localStorage.getItem("mais_token");
+  if (!raw || raw === "null" || raw === "undefined") return null;
+  return raw;
+}
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("mais_user")) || null; } catch { return null; }
-  });
-  const [token, setToken] = useState(() => localStorage.getItem("mais_token") || null);
+  const [user, setUser] = useState(() => readStoredUser());
+  const [token, setToken] = useState(() => readStoredToken());
 
   const isAuthenticated = !!token && !!user;
 
@@ -22,6 +39,9 @@ export function AuthProvider({ children }) {
       throw new Error(data.error || "Prihlásenie zlyhalo");
     }
     const data = await res.json();
+    if (!data?.token || typeof data.token !== "string" || !data.token.trim()) {
+      throw new Error("Server nevrátil platný token");
+    }
     setUser(data.user);
     setToken(data.token);
     localStorage.setItem("mais_user", JSON.stringify(data.user));
@@ -38,8 +58,8 @@ export function AuthProvider({ children }) {
   // sync medzi tabmi/oknami
   useEffect(() => {
     const onStorage = () => {
-      try { setUser(JSON.parse(localStorage.getItem("mais_user"))); } catch {}
-      setToken(localStorage.getItem("mais_token"));
+      setUser(readStoredUser());
+      setToken(readStoredToken());
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);

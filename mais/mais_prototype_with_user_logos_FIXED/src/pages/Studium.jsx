@@ -5,7 +5,7 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 export default function Studium() {
     /* ======= Moje predmety / známky ======= */
-    const { token, user } = useAuth();
+    const { token, user, logout } = useAuth();
     const isStudent = user?.role === 'STUDENT';
     const [semesters, setSemesters] = useState([]);
     const [sem, setSem] = useState('');
@@ -30,6 +30,10 @@ export default function Studium() {
                         Authorization: `Bearer ${token}`,
                     },
                 });
+                if (res.status === 401 || res.status === 403) {
+                    logout();
+                    throw new Error('Vaše prihlásenie vypršalo. Prihláste sa znova.');
+                }
                 if (!res.ok) {
                     throw new Error('Nepodarilo sa načítať hodnotenia');
                 }
