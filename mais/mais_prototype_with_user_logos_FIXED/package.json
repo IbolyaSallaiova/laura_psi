@@ -1,0 +1,23 @@
+{
+  "name": "mais-prototype-final3",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.14.1",
+    "i18next": "^23.0.0",
+    "react-i18next": "^13.0.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "rimraf": "^6.0.0"
+  },
+  "scripts": {
+    "dev": "vite --force",
+    "build": "vite build",
+    "preview": "vite preview",
+    "clean:vite": "rimraf node_modules/.vite vite-cache"
+  }
+}
