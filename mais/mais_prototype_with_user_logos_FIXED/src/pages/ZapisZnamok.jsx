@@ -1,53 +1,17 @@
-import React, { useMemo, useState } from "react";
+import React from "react";
+import { useAuth } from "../context/AuthContext";
 
-/** Demo dáta učiteľa: predmety, termíny, študenti */
-const teacherData = [
-    {
-        code: "INF101",
-        name: "Programovanie 1",
-        slots: [
-            { id: "inf101-1", label: "Po 08:00–09:30 (A-101)", room: "A-101" },
-            { id: "inf101-2", label: "St 10:00–11:30 (A-102)", room: "A-102" },
-        ],
-        students: [
-            { id: 1, name: "Bc. Študent A" },
-            { id: 2, name: "Bc. Študent B" },
-            { id: 3, name: "Bc. Študent C" },
-        ],
-    },
-    {
-        code: "MAT101",
-        name: "Matematika 1",
-        slots: [
-            { id: "mat101-1", label: "Ut 09:45–11:15 (B-201)", room: "B-201" },
-        ],
-        students: [
-            { id: 4, name: "Bc. Študent D" },
-            { id: 5, name: "Bc. Študent E" },
-        ],
-    },
-    {
-        code: "ALG201",
-        name: "Algoritmy",
-        slots: [
-            { id: "alg201-1", label: "Št 11:30–13:00 (C-301)", room: "C-301" },
-        ],
-        students: [
-            { id: 6, name: "Bc. Študent F" },
-            { id: 7, name: "Bc. Študent G" },
-            { id: 8, name: "Bc. Študent H" },
-        ],
-    },
-];
-
-/** Váhy hodnotení (spolu 100) */
-const WEIGHTS = {
-    zapocet: 20, // Z
-    zadanie1: 30, // Z1
-    skuska: 50, // S
+const DEFAULT_MAX_POINTS = {
+    zapocet: 20,
+    zadanie1: 30,
+    skuska: 50,
 };
 
-/** Mapa percent -> ECTS písmeno */
+const withDefaultMaxPoints = (partial = {}) => ({
+    ...DEFAULT_MAX_POINTS,
+    ...partial,
+});
+
 function percentToGrade(p) {
     const x = Math.round(p);
     if (x >= 91) return "A";
@@ -58,48 +22,142 @@ function percentToGrade(p) {
     return "FX";
 }
 
-/** Utility na bezpečné číslo 0–100 */
-function clampPercent(v) {
+function clampScore(v, max) {
     const n = Number(v);
     if (Number.isNaN(n)) return "";
-    return Math.max(0, Math.min(100, n));
+    const safeMax = Number(max) || 0;
+    return Math.max(0, Math.min(safeMax, n));
 }
 
+const API = import.meta.env.VITE_API_URL || "http://localhost:8080";
+
 export default function ZapisZnamok() {
-    const [subjectCode, setSubjectCode] = useState(teacherData[0].code);
-    const subject = useMemo(
-        () => teacherData.find((c) => c.code === subjectCode),
-        [subjectCode]
+    const { token, user } = useAuth();
+    const [subjects, setSubjects] = React.useState([]);
+    const [loading, setLoading] = React.useState(false);
+    const [error, setError] = React.useState(null);
+
+    const [subjectId, setSubjectId] = React.useState(null);
+    const [groupId, setGroupId] = React.useState(null);
+    const [dataByKey, setDataByKey] = React.useState({});
+
+    const isTeacher = user?.role === "TEACHER";
+
+    React.useEffect(() => {
+        if (!isTeacher || !token) {
+            setSubjects([]);
+            setSubjectId(null);
+            setGroupId(null);
+            return;
+        }
+        let cancelled = false;
+        async function load() {
+            setLoading(true);
+            setError(null);
+            try {
+                const res = await fetch(`${API}/api/teacher/subjects`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
+                if (!res.ok) {
+                    throw new Error("Nepodarilo sa načítať predmety");
+                }
+                const data = await res.json();
+                if (!cancelled) {
+                    setSubjects(data);
+                    if (data.length > 0) {
+                        setSubjectId((prev) =>
+                            prev && data.some((s) => s.id === prev) ? prev : data[0].id
+                        );
+                    } else {
+                        setSubjectId(null);
+                        setGroupId(null);
+                    }
+                }
+            } catch (e) {
+                if (!cancelled) {
+                    setError(e.message || String(e));
+                    setSubjects([]);
+                    setSubjectId(null);
+                    setGroupId(null);
+                }
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        }
+        load();
+        return () => {
+            cancelled = true;
+        };
+    }, [token, isTeacher]);
+
+    const subject = React.useMemo(
+        () => subjects.find((s) => s.id === subjectId) || null,
+        [subjects, subjectId]
     );
 
-    const [slotId, setSlotId] = useState(subject?.slots[0]?.id || "");
+    const groups = subject?.groups || [];
 
-    // per-term hodnotenia študentov (key = subjectCode|slotId)
-    const key = `${subjectCode}|${slotId}`;
-    const initialRows = useMemo(() => {
-        if (!subject) return [];
-        return subject.students.map((s) => ({
-            studentId: s.id,
-            student: s.name,
-            zapocet: "",   // 0..100
-            zadanie1: "",  // 0..100
-            skuska: "",    // 0..100
-            finalOverride: "", // '', 'A'..'FX'
+    React.useEffect(() => {
+        if (!groups.length) {
+            setGroupId(null);
+            return;
+        }
+        setGroupId((prev) => (prev && groups.some((g) => g.id === prev) ? prev : groups[0].id));
+    }, [groups]);
+
+    const group = React.useMemo(
+        () => groups.find((g) => g.id === groupId) || null,
+        [groups, groupId]
+    );
+
+    const key = subject && group ? `${subject.id}|${group.id}` : "__none__";
+
+    const initialRows = React.useMemo(() => {
+        if (!group) return [];
+        return group.students.map((student) => ({
+            studentId: student.id,
+            student: student.fullName,
+            zapocet: student.grades?.zapocet ?? "",
+            zadanie1: student.grades?.zadanie1 ?? "",
+            skuska: student.grades?.skuska ?? "",
+            finalOverride: student.grades?.finalOverride || "",
         }));
-    }, [subject]);
+    }, [group]);
 
-    const [dataByKey, setDataByKey] = useState({ [key]: initialRows });
+    React.useEffect(() => {
+        if (!group) return;
+        setDataByKey((prev) => {
+            if (prev[key]) return prev;
+            return { ...prev, [key]: initialRows };
+        });
+    }, [group, key, initialRows]);
 
-    // vždy keď sa zmení predmet/slot a nemáme tam dáta, inicializovať
-    const rows = dataByKey[key] || initialRows;
+    const rows = group ? dataByKey[key] || initialRows : [];
 
-    const setRows = (newRows) => {
-        setDataByKey((prev) => ({ ...prev, [key]: newRows }));
-    };
+    const currentMaxPoints = React.useMemo(
+        () => withDefaultMaxPoints(subject?.maxPoints),
+        [subject]
+    );
+
+    const setRows = React.useCallback(
+        (updater) => {
+            if (!group) return;
+            setDataByKey((prev) => {
+                const existing = prev[key] || initialRows;
+                const next =
+                    typeof updater === "function" ? updater(existing) : updater;
+                if (next === existing) return prev;
+                return { ...prev, [key]: next };
+            });
+        },
+        [group, key, initialRows]
+    );
 
     const updateCell = (studentId, field, value) => {
-        setRows(
-            rows.map((r) =>
+        setRows((existingRows) =>
+            existingRows.map((r) =>
                 r.studentId === studentId ? { ...r, [field]: value } : r
             )
         );
@@ -109,12 +167,12 @@ export default function ZapisZnamok() {
         const z = Number(r.zapocet) || 0;
         const z1 = Number(r.zadanie1) || 0;
         const s = Number(r.skuska) || 0;
-        const total =
-            (z * WEIGHTS.zapocet +
-                z1 * WEIGHTS.zadanie1 +
-                s * WEIGHTS.skuska) /
-            100;
-        return total;
+        const totalMax =
+            Number(currentMaxPoints.zapocet || 0) +
+            Number(currentMaxPoints.zadanie1 || 0) +
+            Number(currentMaxPoints.skuska || 0);
+        if (totalMax <= 0) return 0;
+        return ((z + z1 + s) / totalMax) * 100;
     };
 
     const withGrade = (r) => {
@@ -126,45 +184,165 @@ export default function ZapisZnamok() {
 
     const enriched = rows.map(withGrade);
 
-    const avgPercent = useMemo(() => {
+    const avgPercent = React.useMemo(() => {
         const nums = enriched.map((r) => r.total).filter((n) => !Number.isNaN(n));
         if (!nums.length) return "—";
         return (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) + " %";
     }, [enriched]);
 
-    const save = () => {
-        // v demu len uložíme do localStorage pre ten key
-        localStorage.setItem(`grades_${key}`, JSON.stringify(rows));
-        alert("Známky uložené (demo).");
+    const handleMaxPointChange = (field, value) => {
+        if (!subject) return;
+        const sanitized = Math.max(0, Number(value) || 0);
+        setSubjects((prev) =>
+            prev.map((s) =>
+                s.id === subject.id
+                    ? {
+                          ...s,
+                          maxPoints: withDefaultMaxPoints({
+                              ...s.maxPoints,
+                              [field]: sanitized,
+                          }),
+                      }
+                    : s
+            )
+        );
+    };
+
+    React.useEffect(() => {
+        if (!group) return;
+        setRows((existingRows) => {
+            let changed = false;
+            const next = existingRows.map((row) => {
+                const cz = clampScore(row.zapocet, currentMaxPoints.zapocet);
+                const cz1 = clampScore(row.zadanie1, currentMaxPoints.zadanie1);
+                const cs = clampScore(row.skuska, currentMaxPoints.skuska);
+                if (cz === row.zapocet && cz1 === row.zadanie1 && cs === row.skuska) {
+                    return row;
+                }
+                changed = true;
+                return { ...row, zapocet: cz, zadanie1: cz1, skuska: cs };
+            });
+            return changed ? next : existingRows;
+        });
+    }, [currentMaxPoints, group, setRows]);
+
+    const save = async () => {
+        if (!subject || !group) return;
+        try {
+            const payload = {
+                maxPoints: {
+                    zapocet: Number(currentMaxPoints.zapocet) || 0,
+                    zadanie1: Number(currentMaxPoints.zadanie1) || 0,
+                    skuska: Number(currentMaxPoints.skuska) || 0,
+                },
+                grades: rows.map((r) => ({
+                    studentId: r.studentId,
+                    zapocet: r.zapocet === "" ? null : Number(r.zapocet),
+                    zadanie1: r.zadanie1 === "" ? null : Number(r.zadanie1),
+                    skuska: r.skuska === "" ? null : Number(r.skuska),
+                    finalOverride: r.finalOverride || null,
+                })),
+            };
+            const res = await fetch(
+                `${API}/api/teacher/subjects/${subject.id}/groups/${group.id}/grades`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify(payload),
+                }
+            );
+            if (!res.ok) {
+                const message = await res.text();
+                throw new Error(message || "Ukladanie zlyhalo");
+            }
+            const updatedSubject = await res.json();
+            setSubjects((prev) =>
+                prev.map((s) => (s.id === updatedSubject.id ? updatedSubject : s))
+            );
+            const updatedGroup = updatedSubject.groups.find((g) => g.id === group.id);
+            if (updatedGroup) {
+                const freshRows = updatedGroup.students.map((student) => ({
+                    studentId: student.id,
+                    student: student.fullName,
+                    zapocet: student.grades?.zapocet ?? "",
+                    zadanie1: student.grades?.zadanie1 ?? "",
+                    skuska: student.grades?.skuska ?? "",
+                    finalOverride: student.grades?.finalOverride || "",
+                }));
+                setDataByKey((prev) => ({ ...prev, [key]: freshRows }));
+            }
+            alert("Známky uložené.");
+        } catch (e) {
+            alert(e.message || "Ukladanie zlyhalo");
+        }
     };
 
     const reset = () => {
-        setRows(initialRows);
+        setDataByKey((prev) => ({ ...prev, [key]: initialRows }));
     };
 
-    // ak sa zmení subject, nastav default slot (ak chýba)
-    React.useEffect(() => {
-        if (!subject) return;
-        if (!subject.slots.find((s) => s.id === slotId)) {
-            setSlotId(subject.slots[0]?.id || "");
-        }
-    }, [subjectCode]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isTeacher) {
+        return (
+            <div className="card">
+                <h3 style={{ marginTop: 0 }}>Zápis známok</h3>
+                <div className="empty-note">
+                    Pre prístup k tejto sekcii je potrebné prihlásiť sa ako učiteľ.
+                </div>
+            </div>
+        );
+    }
+
+    if (loading) {
+        return (
+            <div className="card">
+                <h3 style={{ marginTop: 0 }}>Zápis známok</h3>
+                <div className="empty-note">Načítavam údaje…</div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="card">
+                <h3 style={{ marginTop: 0 }}>Zápis známok</h3>
+                <div className="empty-note" style={{ color: "var(--danger)" }}>
+                    {error}
+                </div>
+            </div>
+        );
+    }
+
+    if (!subject || !group) {
+        return (
+            <div className="card">
+                <h3 style={{ marginTop: 0 }}>Zápis známok</h3>
+                <div className="empty-note">Nemáte priradené žiadne predmety.</div>
+            </div>
+        );
+    }
+
+    const totalMaxPoints =
+        Number(currentMaxPoints.zapocet || 0) +
+        Number(currentMaxPoints.zadanie1 || 0) +
+        Number(currentMaxPoints.skuska || 0);
 
     return (
         <div className="card">
             <h3 style={{ marginTop: 0 }}>Zápis známok</h3>
 
-            {/* Výber predmetu a termínu */}
             <div className="form-row" style={{ gap: 12, alignItems: "end" }}>
                 <div style={{ flex: 1 }}>
                     <div className="small">Predmet</div>
                     <select
                         className="input"
-                        value={subjectCode}
-                        onChange={(e) => setSubjectCode(e.target.value)}
+                        value={subjectId ?? ""}
+                        onChange={(e) => setSubjectId(Number(e.target.value))}
                     >
-                        {teacherData.map((c) => (
-                            <option key={c.code} value={c.code}>
+                        {subjects.map((c) => (
+                            <option key={c.id} value={c.id}>
                                 {c.code} — {c.name}
                             </option>
                         ))}
@@ -174,27 +352,70 @@ export default function ZapisZnamok() {
                     <div className="small">Termín / čas</div>
                     <select
                         className="input"
-                        value={slotId}
-                        onChange={(e) => setSlotId(e.target.value)}
+                        value={groupId ?? ""}
+                        onChange={(e) => setGroupId(Number(e.target.value))}
                     >
-                        {subject?.slots.map((s) => (
+                        {groups.map((s) => (
                             <option key={s.id} value={s.id}>
                                 {s.label}
                             </option>
                         ))}
                     </select>
                 </div>
-                <div className="badge" title="Váhy hodnotení">
-                    Váhy: Z {WEIGHTS.zapocet}% • Z1 {WEIGHTS.zadanie1}% • S {WEIGHTS.skuska}%
+                <div className="badge" title="Maximálne body za hodnotenia">
+                    Max body: Z {currentMaxPoints.zapocet} • Z1 {currentMaxPoints.zadanie1} • S {currentMaxPoints.skuska} (spolu {totalMaxPoints})
                 </div>
             </div>
 
-            {/* Priemer */}
+            <div
+                className="form-row"
+                style={{ gap: 12, alignItems: "end", marginTop: 12 }}
+            >
+                <div style={{ flex: 1 }}>
+                    <div className="small">Max. body za Z</div>
+                    <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={currentMaxPoints.zapocet}
+                        onChange={(e) =>
+                            handleMaxPointChange("zapocet", e.target.value)
+                        }
+                    />
+                </div>
+                <div style={{ flex: 1 }}>
+                    <div className="small">Max. body za Z1</div>
+                    <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={currentMaxPoints.zadanie1}
+                        onChange={(e) =>
+                            handleMaxPointChange("zadanie1", e.target.value)
+                        }
+                    />
+                </div>
+                <div style={{ flex: 1 }}>
+                    <div className="small">Max. body za S</div>
+                    <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={currentMaxPoints.skuska}
+                        onChange={(e) =>
+                            handleMaxPointChange("skuska", e.target.value)
+                        }
+                    />
+                </div>
+            </div>
+
             <div className="small" style={{ marginTop: 8 }}>
                 Priemer spolu: <strong>{avgPercent}</strong>
             </div>
 
-            {/* Tabuľka študentov */}
             <table className="table table-compact" style={{ marginTop: 8 }}>
                 <thead>
                 <tr>
@@ -202,9 +423,9 @@ export default function ZapisZnamok() {
                     <th>Predmet</th>
                     <th>Termín</th>
                     <th>Študent</th>
-                    <th>Z (0–100)</th>
-                    <th>Z1 (0–100)</th>
-                    <th>S (0–100)</th>
+                    <th>Z (0–{currentMaxPoints.zapocet})</th>
+                    <th>Z1 (0–{currentMaxPoints.zadanie1})</th>
+                    <th>S (0–{currentMaxPoints.skuska})</th>
                     <th>% spolu</th>
                     <th>Známka</th>
                 </tr>
@@ -216,18 +437,25 @@ export default function ZapisZnamok() {
                             <span className="pill pill-blue">{subject.code}</span>
                         </td>
                         <td>{subject.name}</td>
-                        <td>{subject.slots.find((s) => s.id === slotId)?.label || "—"}</td>
+                        <td>{group.label}</td>
                         <td>{r.student}</td>
                         <td style={{ width: 110 }}>
                             <input
                                 className="input"
                                 type="number"
                                 min="0"
-                                max="100"
+                                max={currentMaxPoints.zapocet}
                                 step="1"
                                 value={r.zapocet}
                                 onChange={(e) =>
-                                    updateCell(r.studentId, "zapocet", clampPercent(e.target.value))
+                                    updateCell(
+                                        r.studentId,
+                                        "zapocet",
+                                        clampScore(
+                                            e.target.value,
+                                            currentMaxPoints.zapocet
+                                        )
+                                    )
                                 }
                             />
                         </td>
@@ -236,11 +464,18 @@ export default function ZapisZnamok() {
                                 className="input"
                                 type="number"
                                 min="0"
-                                max="100"
+                                max={currentMaxPoints.zadanie1}
                                 step="1"
                                 value={r.zadanie1}
                                 onChange={(e) =>
-                                    updateCell(r.studentId, "zadanie1", clampPercent(e.target.value))
+                                    updateCell(
+                                        r.studentId,
+                                        "zadanie1",
+                                        clampScore(
+                                            e.target.value,
+                                            currentMaxPoints.zadanie1
+                                        )
+                                    )
                                 }
                             />
                         </td>
@@ -249,11 +484,18 @@ export default function ZapisZnamok() {
                                 className="input"
                                 type="number"
                                 min="0"
-                                max="100"
+                                max={currentMaxPoints.skuska}
                                 step="1"
                                 value={r.skuska}
                                 onChange={(e) =>
-                                    updateCell(r.studentId, "skuska", clampPercent(e.target.value))
+                                    updateCell(
+                                        r.studentId,
+                                        "skuska",
+                                        clampScore(
+                                            e.target.value,
+                                            currentMaxPoints.skuska
+                                        )
+                                    )
                                 }
                             />
                         </td>
